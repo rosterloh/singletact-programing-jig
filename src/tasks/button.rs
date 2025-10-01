@@ -4,7 +4,7 @@ use core::pin;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{
-    gpio::{self, InputConfig, OutputConfig},
+    gpio::{self, InputConfig, OutputConfig, Pull},
     peripherals::{GPIO3, GPIO9},
 };
 use futures::future::{Either, select};
@@ -24,7 +24,7 @@ pub enum ButtonEvent {
 #[embassy_executor::task]
 pub async fn handle_button(led_pin: GPIO3<'static>, button_pin: GPIO9<'static>) {
     let mut led = gpio::Output::new(led_pin, gpio::Level::Low, OutputConfig::default());
-    let mut button = gpio::Input::new(button_pin, InputConfig::default().with_pull(gpio::Pull::Up));
+    let mut button = gpio::Input::new(button_pin, InputConfig::default().with_pull(Pull::Up));
     loop {
         button.wait_for_low().await;
         let time_down = Instant::now();

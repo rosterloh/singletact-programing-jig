@@ -5,35 +5,45 @@
     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
     holding buffers for the duration of a data transfer."
 )]
+
 // use alloc::{boxed::Box, rc::Rc};
-use defmt::{error, info};
+use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::yield_now;
-use embedded_graphics::{
-    Drawable,
-    mono_font::{MonoTextStyleBuilder, iso_8859_9::FONT_10X20},
-    pixelcolor::BinaryColor,
-    prelude::Point,
-    text::{Baseline, Text},
-};
-// use esp_backtrace as _;
+use embassy_futures::select::{Either, select};
+use embassy_sync::channel::Channel;
+use embassy_time::{Duration, Timer};
 use esp_hal::{
+    Async,
     Config,
     clock::CpuClock,
+    gpio::{Input, InputConfig, Pull},
     i2c::master::{Config as I2cConfig, I2c},
     rmt::Rmt,
+    // rng::Rng,
     time::Rate,
-    timer::timg::TimerGroup,
+    timer::{systimer::SystemTimer /*timg::TimerGroup,*/},
 };
 use panic_rtt_target as _;
 use singletact_programing_jig::{
-    BUTTON_STATE, ButtonEvent,
-    tasks::{handle_button, handle_neopixel},
+    drivers::{button::wait_for_press, neopixel::LedDriver},
+    tasks::display::{
+        DisplayChannel, DisplayChannelReceiver, /*DisplayChannelSender, */ DisplayState,
+        display_task,
+    },
 };
-use ssd1306::{
-    I2CDisplayInterface, Ssd1306Async, mode::DisplayConfigAsync, prelude::DisplayRotation,
-    size::DisplaySize128x64,
-};
+
+use static_cell::StaticCell;
+
+/// Communicate with the display task using this channel and the DisplayState enum
+// static DISPLAY_SENDER: StaticCell<DisplayChannelSender> = StaticCell::new();
+static DISPLAY_RECEIVER: StaticCell<DisplayChannelReceiver> = StaticCell::new();
+static DISPLAY_CHANNEL: StaticCell<DisplayChannel> = StaticCell::new();
+
+/// Our LED driver that underlies the display task
+static LED_DRIVER: StaticCell<LedDriver> = StaticCell::new();
+
+/// I2c bus shared between display and sensors
+static I2C_DRIVER: StaticCell<I2c<'static, Async>> = StaticCell::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -47,67 +57,56 @@ async fn main(spawner: Spawner) {
     // esp_alloc::heap_allocator!(size: (48 + 96) * 1024);
 
     let peripherals = esp_hal::init(Config::default().with_cpu_clock(CpuClock::max()));
-    let timer_group_0 = TimerGroup::new(peripherals.TIMG0);
-    esp_hal_embassy::init(timer_group_0.timer0);
+    let timer0 = SystemTimer::new(peripherals.SYSTIMER);
+    // let timer1 = TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timer0.alarm0);
 
-    spawner
-        .spawn(handle_button(peripherals.GPIO3, peripherals.GPIO9))
-        .unwrap();
+    let display_channel = DISPLAY_CHANNEL.init(Channel::new());
+    let sender = display_channel.sender();
+    // let ble_sender = DISPLAY_SENDER.init(sender);
+    let receiver = DISPLAY_RECEIVER.init(display_channel.receiver());
+    // let mut rng = Rng::new(peripherals.RNG);
 
-    let frequency = Rate::from_mhz(80);
-    let rmt = Rmt::new(peripherals.RMT, frequency)
+    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80))
         .expect("Failed to initialise RMT0")
         .into_async();
+    let led_driver = LED_DRIVER.init(LedDriver::new(rmt, peripherals.GPIO2));
+    let i2c = I2C_DRIVER.init(
+        I2c::new(peripherals.I2C0, I2cConfig::default())
+            .unwrap()
+            .with_scl(peripherals.GPIO6)
+            .with_sda(peripherals.GPIO5)
+            .into_async(),
+    );
+    // Start the display manager task
     spawner
-        .spawn(handle_neopixel(
-            rmt.channel0,
-            peripherals.GPIO2,
-            peripherals.RNG,
-        ))
-        .unwrap();
+        .spawn(display_task(receiver, led_driver, i2c))
+        .expect("Failed to spawn display task");
 
-    let i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
-        .unwrap()
-        .with_scl(peripherals.GPIO6)
-        .with_sda(peripherals.GPIO5)
-        .into_async();
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-    if let Err(_e) = display.init().await {
-        // error!("Error: {:?}", e);
-        error!("Display couldn't be initialised");
-        loop {
-            yield_now().await;
-        }
-    }
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_10X20)
-        .text_color(BinaryColor::On)
-        .build();
+    // Set up buttons for the functions we need
+    let config = InputConfig::default().with_pull(Pull::Up);
+    let mut button0 = Input::new(peripherals.GPIO9, config);
+    let mut button1 = Input::new(peripherals.GPIO3, config);
 
-    display.clear_buffer();
-    Text::with_baseline(
-        "Press button\nto start",
-        Point::zero(),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)
-    .unwrap();
-    display.flush().await.unwrap();
-
+    info!("MAIN: Starting main loop");
+    sender.send(DisplayState::Init).await;
+    let mut torch = false;
     loop {
-        match BUTTON_STATE.wait().await {
-            ButtonEvent::Press => {
-                info!("Button Pressed");
+        match select(wait_for_press(&mut button0), wait_for_press(&mut button1)).await {
+            Either::First(_) => {
+                info!("MAIN: Toggling torch mode {}", torch);
+                torch ^= true;
+                sender.send(DisplayState::Torch(torch)).await;
             }
-            ButtonEvent::HoldHalfSecond => {
-                info!("Button Held Half Second");
+            Either::Second(_) => {
+                info!("MAIN: Starting device programming");
+                for i in 0..8 {
+                    sender.send(DisplayState::SetAddress(i)).await;
+                    Timer::after(Duration::from_secs(1)).await;
+                }
+                sender.send(DisplayState::Init).await;
             }
-            ButtonEvent::HoldFullSecond => {
-                info!("Button Held Full Second");
-            }
-        }
+        };
+        info!("MAIN: Button pressed");
     }
 }

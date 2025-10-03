@@ -305,6 +305,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-embedded-hal"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "554e3e840696f54b4c9afcf28a0f24da431c927f4151040020416e7393d6d0d8"
+dependencies = [
+ "embassy-futures",
+ "embassy-hal-internal",
+ "embassy-sync 0.7.2",
+ "embedded-hal 0.2.7",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-storage",
+ "embedded-storage-async",
+ "nb 1.1.0",
+]
+
+[[package]]
 name = "embassy-executor"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -470,7 +487,20 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
+ "defmt 0.3.100",
  "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "embedded-hal-bus"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513e0b3a8fb7d3013a8ae17a834283f170deaf7d0eeab0a7c1a36ad4dd356d22"
+dependencies = [
+ "critical-section",
+ "defmt 0.3.100",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -1115,6 +1145,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pca9548"
+version = "0.1.0"
+source = "git+https://github.com/rosterloh/embedded-device-drivers.git?rev=516f72ccffa083ab8fe026adf25b5c6fbafd6163#516f72ccffa083ab8fe026adf25b5c6fbafd6163"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "maybe-async-cfg",
+ "thiserror",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1371,16 +1412,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "singletact"
+version = "0.1.0"
+source = "git+https://github.com/rosterloh/embedded-device-drivers.git?rev=516f72ccffa083ab8fe026adf25b5c6fbafd6163#516f72ccffa083ab8fe026adf25b5c6fbafd6163"
+dependencies = [
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-hal-bus",
+ "maybe-async-cfg",
+]
+
+[[package]]
 name = "singletact-programing-jig"
 version = "0.1.0"
 dependencies = [
  "critical-section",
  "defmt 1.0.1",
+ "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-graphics",
+ "embedded-hal-async",
+ "embedded-hal-bus",
  "embedded-test",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -1390,7 +1445,9 @@ dependencies = [
  "fastrand",
  "heapless 0.9.1",
  "panic-rtt-target",
+ "pca9548",
  "rtt-target",
+ "singletact",
  "smart-leds",
  "ssd1306",
  "static_cell",

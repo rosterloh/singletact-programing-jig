@@ -4,6 +4,7 @@ use crate::{
     drivers::neopixel::{LedBuffer, LedDriver},
 };
 use defmt::{debug, error, info};
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_futures::{
     select::{Either, select},
     yield_now,
@@ -57,6 +58,7 @@ pub type DisplayChannelSender =
     Sender<'static, CriticalSectionRawMutex, DisplayState, DISPLAY_QUEUE_SIZE>;
 pub type DisplayChannelReceiver =
     Receiver<'static, CriticalSectionRawMutex, DisplayState, DISPLAY_QUEUE_SIZE>;
+pub type I2cBus = I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>;
 
 /// Display driver main task.
 /// The display is fully managed from this task. It contains the state and responds to messages
@@ -71,7 +73,7 @@ pub type DisplayChannelReceiver =
 pub async fn display_task(
     channel: &'static DisplayChannelReceiver,
     led: &'static mut LedDriver,
-    i2c: &'static mut I2c<'static, Async>,
+    i2c_bus: &'static I2cBus,
 ) {
     let mut animation = Ticker::every(Duration::from_millis(ANIMATION_UPDATE));
     let mut running = true;
@@ -83,7 +85,8 @@ pub async fn display_task(
     let mut brightness: u8 = 10;
     let mut torch = false;
 
-    let interface = I2CDisplayInterface::new(i2c);
+    let i2c_dev1 = I2cDevice::new(i2c_bus);
+    let interface = I2CDisplayInterface::new(i2c_dev1);
     let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
     if let Err(_e) = display.init().await {
